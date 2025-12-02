@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Dark Mode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-white min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <h1 class="text-3xl font-bold mb-8">🌓 Test Dark Mode</h1>
+        
+        <div class="bg-gray-100 dark:bg-gray-800 p-6 rounded-lg mb-6">
+            <h2 class="text-xl font-semibold mb-4">Status</h2>
+            <div id="status" class="space-y-2"></div>
+        </div>
+
+        <button 
+            id="toggleBtn"
+            class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition"
+        >
+            Toggle Dark Mode
+        </button>
+
+        <div class="mt-8 p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <h3 class="font-semibold mb-2">Test Elements:</h3>
+            <p class="text-gray-600 dark:text-gray-400">This text should change color</p>
+            <div class="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded">
+                Background should change
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateStatus() {
+            const html = document.documentElement
+            const isDark = html.classList.contains('dark')
+            const saved = localStorage.getItem('darkMode')
+            
+            document.getElementById('status').innerHTML = `
+                <p><strong>HTML Class:</strong> ${html.className || 'none'}</p>
+                <p><strong>Is Dark:</strong> ${isDark ? '✅ Yes' : '❌ No'}</p>
+                <p><strong>LocalStorage:</strong> ${saved || 'not set'}</p>
+            `
+        }
+
+        document.getElementById('toggleBtn').addEventListener('click', () => {
+            const html = document.documentElement
+            const isDark = html.classList.contains('dark')
+            
+            console.log('Before toggle:', isDark)
+            
+            if (isDark) {
+                html.classList.remove('dark')
+                localStorage.setItem('darkMode', 'false')
+            } else {
+                html.classList.add('dark')
+                localStorage.setItem('darkMode', 'true')
+            }
+            
+            console.log('After toggle:', html.classList.contains('dark'))
+            updateStatus()
+        })
+
+        // Initialize
+        const saved = localStorage.getItem('darkMode')
+        if (saved === 'true') {
+            document.documentElement.classList.add('dark')
+        }
+        updateStatus()
+    </script>
+</body>
+</html>

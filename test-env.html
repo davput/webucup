@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Environment Variables</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .success { color: #16a34a; }
+        .error { color: #dc2626; }
+        pre {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Test Environment Variables</h1>
+    
+    <div class="card">
+        <h2>Status Environment Variables</h2>
+        <div id="env-status"></div>
+    </div>
+
+    <div class="card">
+        <h2>📋 Langkah Troubleshooting</h2>
+        <ol>
+            <li>Pastikan file <code>.env</code> ada di root folder (sejajar dengan <code>package.json</code>)</li>
+            <li>Stop dev server dengan <code>Ctrl+C</code></li>
+            <li>Jalankan ulang dengan <code>npm run dev</code></li>
+            <li>Refresh halaman ini</li>
+            <li>Jika masih error, coba hapus folder <code>node_modules</code> dan <code>package-lock.json</code>, lalu jalankan <code>npm install</code> lagi</li>
+        </ol>
+    </div>
+
+    <div class="card">
+        <h2>Isi File .env yang Benar</h2>
+        <pre><code>VITE_SUPABASE_URL=https://plbgexhgmpyvomjdvhem.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYmdleGhnbXB5dm9tamR2aGVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1OTk0OTMsImV4cCI6MjA4MDE3NTQ5M30.IbGTQ4q0QgfOMGEAKc2PiaSOOj1Z5wvEpjW_Xv_XgAs</code></pre>
+    </div>
+
+    <script type="module">
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+        const statusDiv = document.getElementById('env-status')
+        
+        let html = '<table style="width: 100%; border-collapse: collapse;">'
+        html += '<tr style="border-bottom: 1px solid #e5e7eb;"><th style="text-align: left; padding: 10px;">Variable</th><th style="text-align: left; padding: 10px;">Status</th></tr>'
+        
+        if (supabaseUrl) {
+            html += `<tr><td style="padding: 10px;"><code>VITE_SUPABASE_URL</code></td><td style="padding: 10px;" class="success">✅ Terdeteksi: ${supabaseUrl}</td></tr>`
+        } else {
+            html += `<tr><td style="padding: 10px;"><code>VITE_SUPABASE_URL</code></td><td style="padding: 10px;" class="error">❌ Tidak terdeteksi</td></tr>`
+        }
+        
+        if (supabaseAnonKey) {
+            html += `<tr><td style="padding: 10px;"><code>VITE_SUPABASE_ANON_KEY</code></td><td style="padding: 10px;" class="success">✅ Terdeteksi (${supabaseAnonKey.substring(0, 20)}...)</td></tr>`
+        } else {
+            html += `<tr><td style="padding: 10px;"><code>VITE_SUPABASE_ANON_KEY</code></td><td style="padding: 10px;" class="error">❌ Tidak terdeteksi</td></tr>`
+        }
+        
+        html += '</table>'
+        
+        if (supabaseUrl && supabaseAnonKey) {
+            html += '<div style="margin-top: 20px; padding: 15px; background: #dcfce7; border-radius: 4px; color: #166534;"><strong>✅ Semua environment variables terdeteksi dengan baik!</strong><br>Aplikasi seharusnya bisa berjalan normal.</div>'
+        } else {
+            html += '<div style="margin-top: 20px; padding: 15px; background: #fee2e2; border-radius: 4px; color: #991b1b;"><strong>❌ Environment variables tidak terdeteksi!</strong><br>Ikuti langkah troubleshooting di atas.</div>'
+        }
+        
+        statusDiv.innerHTML = html
+    </script>
+</body>
+</html>
