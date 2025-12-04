@@ -538,7 +538,7 @@ export default function StoreDetail() {
               <div className="text-center py-12">
                 <ShoppingCart className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
                 <p className="text-gray-500 dark:text-gray-400">Belum ada riwayat pembelian</p>
-                <Button onClick={() => navigate('/orders/create')} className="mt-4">
+                <Button onClick={() => navigate(`/orders/create?store=${id}`)} className="mt-4">
                   Buat Order Baru
                 </Button>
               </div>

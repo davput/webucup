@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react'
-import { Plus, Package, TrendingUp, Edit, Trash2 } from 'lucide-react'
+import { Plus, TrendingUp, Edit, Trash2 } from 'lucide-react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
-import Toast from '../components/Toast'
 import CurrencyInput from '../components/CurrencyInput'
-import { useToast } from '../hooks/useToast'
+import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
 
 export default function StockIn() {
-  const { toast, showSuccess, showError, hideToast } = useToast()
+  const { showToast } = useToast()
   const [stockIns, setStockIns] = useState([])
   const [products, setProducts] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -88,11 +87,11 @@ export default function StockIn() {
         .eq('id', editingStockIn.id)
 
       if (error) {
-        showError('Gagal mengupdate stok: ' + error.message)
+        showToast('Gagal mengupdate stok: ' + error.message, 'error')
         return
       }
 
-      showSuccess('Data stok berhasil diupdate!')
+      showToast('Data stok berhasil diupdate!', 'success')
     } else {
       // Insert new stock in
       const { data: stockIn, error } = await supabase
@@ -107,7 +106,7 @@ export default function StockIn() {
         .single()
 
       if (error) {
-        showError('Gagal menambah stok: ' + error.message)
+        showToast('Gagal menambah stok: ' + error.message, 'error')
         return
       }
 
@@ -120,20 +119,30 @@ export default function StockIn() {
         .update({ stock: newStock })
         .eq('id', formData.product_id)
 
-      // Create stock log
-      await supabase.from('stock_logs').insert([{
-        product_id: formData.product_id,
-        type: 'in',
-        quantity: parseInt(formData.quantity),
-        stock_before: product.stock,
-        stock_after: newStock,
-        reference_type: 'stock_in',
-        reference_id: stockIn.id,
-        notes: formData.notes,
-        created_by: 'Admin'
-      }])
+      // Check if stock log already exists for this stock_in
+      const { data: existingLog } = await supabase
+        .from('stock_logs')
+        .select('id')
+        .eq('reference_type', 'stock_in')
+        .eq('reference_id', stockIn.id)
+        .single()
 
-      showSuccess('Stok berhasil ditambahkan!')
+      // Only create stock log if it doesn't exist yet
+      if (!existingLog) {
+        await supabase.from('stock_logs').insert([{
+          product_id: formData.product_id,
+          type: 'in',
+          quantity: parseInt(formData.quantity),
+          stock_before: product.stock,
+          stock_after: newStock,
+          reference_type: 'stock_in',
+          reference_id: stockIn.id,
+          notes: formData.notes,
+          created_by: 'Admin'
+        }])
+      }
+
+      showToast('Stok berhasil ditambahkan!', 'success')
     }
 
     setIsModalOpen(false)
@@ -155,11 +164,11 @@ export default function StockIn() {
     const { error } = await supabase.from('suppliers').insert([supplierForm])
 
     if (error) {
-      showError('Gagal menambah supplier: ' + error.message)
+      showToast('Gagal menambah supplier: ' + error.message, 'error')
       return
     }
 
-    showSuccess('Supplier berhasil ditambahkan!')
+    showToast('Supplier berhasil ditambahkan!', 'success')
     setIsSupplierModalOpen(false)
     setSupplierForm({
       name: '',
@@ -194,25 +203,16 @@ export default function StockIn() {
       .eq('id', id)
 
     if (error) {
-      showError('Gagal menghapus: ' + error.message)
+      showToast('Gagal menghapus: ' + error.message, 'error')
       return
     }
 
-    showSuccess('Data stok masuk berhasil dihapus!')
+    showToast('Data stok masuk berhasil dihapus!', 'success')
     loadData()
   }
 
   return (
-    <>
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={hideToast}
-        />
-      )}
-      
-      <div>
+    <div>
       <div className="mb-6 lg:mb-8">
         <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white">Stok Masuk</h1>
         <p className="text-gray-600 dark:text-gray-400 mt-2">Catat stok masuk dari supplier dan update harga modal produk</p>
@@ -470,6 +470,5 @@ export default function StockIn() {
         </form>
       </Modal>
     </div>
-    </>
   )
 }

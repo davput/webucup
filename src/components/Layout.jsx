@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { 
   LayoutDashboard, Package, Store, ShoppingCart, 
-  Truck, Users, DollarSign, FileText, Menu, X, Moon, Sun, ChevronLeft, ChevronRight, ChevronDown, TrendingUp, List, Plus, Settings, Database
+  Truck, Users, DollarSign, FileText, Menu, X, Moon, Sun, ChevronLeft, ChevronRight, ChevronDown, TrendingUp, List, Plus, Settings, Database, Sliders, Lock, Activity, Palette
 } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
+import { supabase } from '../lib/supabase'
 
 const menuItems = [
   { 
@@ -23,7 +24,6 @@ const menuItems = [
       { path: '/stock-in', label: 'Stok Masuk', icon: TrendingUp },
       { path: '/stock-adjustment', label: 'Penyesuaian Stok', icon: Settings },
       { path: '/product-reports', label: 'Laporan Produk', icon: FileText },
-      { path: '/product-master', label: 'Master Data', icon: Database },
     ]
   },
   { 
@@ -73,7 +73,14 @@ const menuItems = [
     path: '/settings', 
     icon: Settings, 
     label: 'Pengaturan', 
-    subtitle: 'Konfigurasi Aplikasi' 
+    subtitle: 'Konfigurasi Sistem',
+    subItems: [
+      { path: '/settings?tab=master-data', label: 'Master Data', icon: Database },
+      { path: '/settings?tab=system-config', label: 'Konfigurasi Sistem', icon: Settings },
+      { path: '/settings?tab=user-security', label: 'User & Keamanan', icon: Lock },
+      { path: '/settings?tab=activity-log', label: 'Log Aktivitas', icon: Activity },
+      { path: '/settings?tab=branding', label: 'Branding & Tampilan', icon: Palette }
+    ]
   },
 ]
 
@@ -97,6 +104,39 @@ export default function Layout({ children }) {
     return expanded
   })
   const { isDark, toggleTheme } = useTheme()
+  const [businessName, setBusinessName] = useState('Pupuk App')
+
+  useEffect(() => {
+    loadBusinessName()
+    
+    // Listen for business name updates
+    const handleBusinessNameUpdate = () => {
+      loadBusinessName()
+    }
+    
+    window.addEventListener('businessNameUpdated', handleBusinessNameUpdate)
+    
+    return () => {
+      window.removeEventListener('businessNameUpdated', handleBusinessNameUpdate)
+    }
+  }, [])
+
+  async function loadBusinessName() {
+    try {
+      const { data } = await supabase
+        .from('system_settings')
+        .select('setting_value')
+        .eq('setting_key', 'business_name')
+        .single()
+      
+      if (data?.setting_value) {
+        setBusinessName(data.setting_value)
+      }
+    } catch (error) {
+      console.error('Error loading business name:', error)
+      // Keep default name if error
+    }
+  }
 
   const toggleDesktopSidebar = () => {
     const newState = !isDesktopSidebarOpen
@@ -142,7 +182,7 @@ export default function Layout({ children }) {
                   <Package className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-bold text-gray-900 dark:text-white">Pupuk App</h1>
+                  <h1 className="text-lg font-bold text-gray-900 dark:text-white">{businessName}</h1>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Distribusi</p>
                 </div>
               </div>
@@ -166,8 +206,16 @@ export default function Layout({ children }) {
             const hasSubItems = item.subItems && item.subItems.length > 0
             const isExpanded = expandedMenus[item.path]
             const isActive = !hasSubItems && location.pathname === item.path
-            const isParentActive = hasSubItems && item.subItems.some(sub => 
-              location.pathname === sub.path || location.pathname.startsWith(sub.path + '/')
+            
+            // Check if parent menu is active (including query params for settings)
+            const isParentActive = hasSubItems && (
+              location.pathname === item.path || 
+              location.pathname.startsWith(item.path + '/') ||
+              item.subItems.some(sub => {
+                // Extract path without query params
+                const subPath = sub.path.split('?')[0]
+                return location.pathname === subPath || location.pathname.startsWith(subPath + '/')
+              })
             )
 
             return (
@@ -225,8 +273,20 @@ export default function Layout({ children }) {
                   <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-200 dark:border-gray-700 pl-4">
                     {item.subItems.map((subItem) => {
                       const SubIcon = subItem.icon
-                      const isSubActive = location.pathname === subItem.path || 
-                                         location.pathname.startsWith(subItem.path + '/')
+                      
+                      // Check if submenu is active (handle both regular paths and query params)
+                      let isSubActive = false
+                      if (subItem.path.includes('?')) {
+                        // For paths with query params (like /settings?tab=master-data)
+                        const [subPath, subQuery] = subItem.path.split('?')
+                        const currentFullPath = location.pathname + location.search
+                        isSubActive = currentFullPath === subItem.path || 
+                                     (location.pathname === subPath && location.search.includes(subQuery))
+                      } else {
+                        // For regular paths
+                        isSubActive = location.pathname === subItem.path || 
+                                     location.pathname.startsWith(subItem.path + '/')
+                      }
                       
                       return (
                         <Link
@@ -292,7 +352,7 @@ export default function Layout({ children }) {
 
               <div className="flex items-center gap-3">
                 <span className="hidden lg:inline text-sm text-gray-600 dark:text-gray-400 font-medium">
-                  Manajemen Distribusi Pupuk
+                  {businessName}
                 </span>
                 
                 <button

@@ -1,5 +1,8 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { ToastProvider } from './context/ToastContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import PinLock from './components/PinLock'
 import Dashboard from './pages/Dashboard'
 import Products from './pages/Products'
 import ProductForm from './pages/ProductForm'
@@ -13,7 +16,6 @@ import StoreForm from './pages/StoreForm'
 import StoreDetail from './pages/StoreDetail'
 import StoreReports from './pages/StoreReports'
 import Orders from './pages/Orders'
-import OrderCreate from './pages/OrderCreate'
 import OrderManagement from './pages/OrderManagement'
 import OrderNew from './pages/OrderNew'
 import OrderDetail from './pages/OrderDetail'
@@ -26,13 +28,29 @@ import Employees from './pages/Employees'
 import EmployeeForm from './pages/EmployeeForm'
 import Finance from './pages/Finance'
 import Reports from './pages/Reports'
-import Settings from './pages/Settings'
+import SettingsNew from './pages/SettingsNew'
 
-function App() {
+function AppContent() {
+  const { isLocked, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isLocked) {
+    return <PinLock />
+  }
+
   return (
-    <Router>
-      <Layout>
-        <Routes>
+    <Layout>
+      <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/products" element={<Products />} />
           <Route path="/products/new" element={<ProductForm />} />
@@ -48,7 +66,7 @@ function App() {
           <Route path="/stores/:id" element={<StoreDetail />} />
           <Route path="/store-reports" element={<StoreReports />} />
           <Route path="/orders" element={<Orders />} />
-          <Route path="/orders/create" element={<OrderCreate />} />
+          <Route path="/orders/create" element={<OrderNew />} />
           <Route path="/order-management" element={<OrderManagement />} />
           <Route path="/orders/new" element={<OrderNew />} />
           <Route path="/orders/:id" element={<OrderDetail />} />
@@ -62,9 +80,20 @@ function App() {
           <Route path="/employees/edit/:id" element={<EmployeeForm />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings" element={<SettingsNew />} />
         </Routes>
-      </Layout>
+    </Layout>
+  )
+}
+
+function App() {
+  return (
+    <Router>
+      <AuthProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </AuthProvider>
     </Router>
   )
 }

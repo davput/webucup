@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Button from '../components/Button'
 import CurrencyInput from '../components/CurrencyInput'
+import ConfirmDialog from '../components/ConfirmDialog'
+import Toast from '../components/Toast'
 import { formatCurrency } from '../lib/utils'
 import { PAYMENT_METHOD_LABELS } from '../lib/constants'
 import { useToast } from '../hooks/useToast'
+import { ActivityLogger } from '../lib/activityLogger'
 
 export default function OrderNew() {
   const navigate = useNavigate()
-  const { showToast } = useToast()
+  const [searchParams] = useSearchParams()
+  const { toasts, showToast, removeToast } = useToast()
   const [loading, setLoading] = useState(false)
   const [stores, setStores] = useState([])
   const [products, setProducts] = useState([])
@@ -35,11 +39,36 @@ export default function OrderNew() {
   const [productSearch, setProductSearch] = useState('')
   const [showStoreDropdown, setShowStoreDropdown] = useState(false)
   const [showProductDropdown, setShowProductDropdown] = useState(false)
+  const [selectedStoreIndex, setSelectedStoreIndex] = useState(-1)
+  const [selectedProductIndex, setSelectedProductIndex] = useState(-1)
+  
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  })
+
+  // Flag to bypass stock check when user confirms
+  const [bypassStockCheck, setBypassStockCheck] = useState(false)
 
   useEffect(() => {
     fetchStores()
     fetchProducts()
   }, [])
+
+  // Auto-select store from URL parameter
+  useEffect(() => {
+    const storeId = searchParams.get('store')
+    if (storeId && stores.length > 0) {
+      const store = stores.find(s => s.id === storeId)
+      if (store) {
+        setFormData({ ...formData, store_id: storeId })
+        setSelectedStore(store)
+      }
+    }
+  }, [searchParams, stores])
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -107,12 +136,54 @@ export default function OrderNew() {
   }
 
   function addItem() {
-    if (!currentItem.product_id || currentItem.quantity <= 0 || currentItem.price <= 0) {
-      showToast('Lengkapi data produk', 'error')
+    // Validate store is selected
+    if (!formData.store_id || formData.store_id === '') {
+      showToast('Pilih toko terlebih dahulu', 'error')
+      console.error('Validasi gagal: Toko belum dipilih')
+      return
+    }
+
+    // Validate product data
+    if (!currentItem.product_id) {
+      showToast('Pilih produk terlebih dahulu', 'error')
+      return
+    }
+
+    if (currentItem.quantity <= 0) {
+      showToast('Jumlah harus lebih dari 0', 'error')
+      return
+    }
+
+    if (currentItem.price <= 0) {
+      showToast('Harga harus lebih dari 0', 'error')
       return
     }
 
     const product = products.find(p => p.id === currentItem.product_id)
+    
+    // Check stock availability
+    if (product.stock === 0) {
+      setConfirmDialog({
+        isOpen: true,
+        title: '⚠️ Peringatan Stok Habis',
+        message: `Produk "${product.name}" memiliki stok 0.\n\nApakah Anda yakin ingin menambahkan produk ini tanpa update stok terlebih dahulu?`,
+        onConfirm: () => proceedAddItem(product)
+      })
+      return
+    } else if (product.stock < currentItem.quantity) {
+      setConfirmDialog({
+        isOpen: true,
+        title: '⚠️ Peringatan Stok Tidak Cukup',
+        message: `Produk: ${product.name}\nStok tersedia: ${product.stock} ${product.unit}\nJumlah order: ${currentItem.quantity} ${product.unit}\n\nKekurangan: ${currentItem.quantity - product.stock} ${product.unit}\n\nApakah Anda yakin ingin melanjutkan?`,
+        onConfirm: () => proceedAddItem(product)
+      })
+      return
+    }
+    
+    proceedAddItem(product)
+  }
+
+  function proceedAddItem(product) {
     
     // Check if product already in list
     const existingIndex = orderItems.findIndex(item => item.product_id === currentItem.product_id)
@@ -139,6 +210,9 @@ export default function OrderNew() {
       price: 0,
       manual_price: false
     })
+    setProductSearch('')
+    setSelectedProductIndex(-1)
+    showToast('Produk ditambahkan ke order', 'success')
   }
 
   function removeItem(index) {
@@ -179,13 +253,30 @@ export default function OrderNew() {
     setLoading(true)
 
     try {
-      // Check stock
-      const stockCheck = await checkStock()
-      if (!stockCheck.sufficient) {
-        showToast(stockCheck.message, 'error')
-        setLoading(false)
-        return
+      // Check stock only if not bypassed
+      if (!bypassStockCheck) {
+        const stockCheck = await checkStock()
+        if (!stockCheck.sufficient) {
+          setLoading(false)
+          // Show confirmation dialog
+          setConfirmDialog({
+            isOpen: true,
+            title: '⚠️ Peringatan Stok Tidak Cukup',
+            message: `${stockCheck.message}\n\nApakah Anda yakin ingin melanjutkan menyimpan order ini?`,
+            onConfirm: () => {
+              setBypassStockCheck(true)
+              // Trigger submit again with bypass flag
+              setTimeout(() => {
+                document.querySelector('form').requestSubmit()
+              }, 100)
+            }
+          })
+          return
+        }
       }
+      
+      // Reset bypass flag for next submission
+      setBypassStockCheck(false)
 
       // Generate order number
       const orderNumber = `ORD-${Date.now()}`
@@ -271,6 +362,9 @@ export default function OrderNew() {
           .eq('id', formData.store_id)
       }
 
+      // Log activity
+      await ActivityLogger.createOrder(orderNumber, selectedStore?.name || 'Toko')
+      
       showToast('Order berhasil dibuat', 'success')
       navigate(`/orders/${order.id}`)
     } catch (error) {
@@ -347,13 +441,50 @@ File add-order-columns.sql ada di root project Anda.`)
                 required={!formData.store_id}
                 value={selectedStore ? selectedStore.name : storeSearch}
                 onChange={(e) => {
-                  setStoreSearch(e.target.value)
+                  const value = e.target.value
+                  setStoreSearch(value)
                   setShowStoreDropdown(true)
-                  if (!e.target.value) {
+                  setSelectedStoreIndex(-1)
+                  
+                  // Clear selection if user types
+                  if (selectedStore) {
                     setFormData({ ...formData, store_id: '' })
+                    setSelectedStore(null)
+                  }
+                  
+                  if (!value) {
+                    setFormData({ ...formData, store_id: '' })
+                    setSelectedStore(null)
                   }
                 }}
-                onFocus={() => setShowStoreDropdown(true)}
+                onFocus={() => {
+                  if (!selectedStore) {
+                    setShowStoreDropdown(true)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (!showStoreDropdown || selectedStore) return
+                  
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSelectedStoreIndex(prev => 
+                      prev < filteredStores.length - 1 ? prev + 1 : prev
+                    )
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSelectedStoreIndex(prev => prev > 0 ? prev - 1 : -1)
+                  } else if (e.key === 'Enter' && selectedStoreIndex >= 0) {
+                    e.preventDefault()
+                    const store = filteredStores[selectedStoreIndex]
+                    setFormData({ ...formData, store_id: store.id })
+                    setStoreSearch('')
+                    setShowStoreDropdown(false)
+                    setSelectedStoreIndex(-1)
+                  } else if (e.key === 'Escape') {
+                    setShowStoreDropdown(false)
+                    setSelectedStoreIndex(-1)
+                  }
+                }}
                 placeholder="Ketik nama toko, pemilik, atau wilayah..."
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
               />
@@ -361,15 +492,20 @@ File add-order-columns.sql ada di root project Anda.`)
               {showStoreDropdown && storeSearch && !selectedStore && (
                 <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                   {filteredStores.length > 0 ? (
-                    filteredStores.map(store => (
+                    filteredStores.map((store, index) => (
                       <div
                         key={store.id}
                         onClick={() => {
                           setFormData({ ...formData, store_id: store.id })
                           setStoreSearch('')
                           setShowStoreDropdown(false)
+                          setSelectedStoreIndex(-1)
                         }}
-                        className="px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-0"
+                        className={`px-4 py-3 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-0 ${
+                          index === selectedStoreIndex
+                            ? 'bg-blue-50 dark:bg-blue-900/30'
+                            : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
                       >
                         <div className="font-medium text-gray-900 dark:text-gray-100">{store.name}</div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -390,9 +526,11 @@ File add-order-columns.sql ada di root project Anda.`)
                   type="button"
                   onClick={() => {
                     setFormData({ ...formData, store_id: '' })
+                    setSelectedStore(null)
                     setStoreSearch('')
                   }}
                   className="absolute right-3 top-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  title="Hapus pilihan toko"
                 >
                   ✕
                 </button>
@@ -430,8 +568,8 @@ File add-order-columns.sql ada di root project Anda.`)
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Tambah Produk</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4">
-            <div className="md:col-span-4 relative">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
+            <div className="md:col-span-2 relative">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Cari Produk
               </label>
@@ -441,11 +579,35 @@ File add-order-columns.sql ada di root project Anda.`)
                 onChange={(e) => {
                   setProductSearch(e.target.value)
                   setShowProductDropdown(true)
+                  setSelectedProductIndex(-1)
                   if (!e.target.value) {
                     setCurrentItem({ ...currentItem, product_id: '', manual_price: false })
                   }
                 }}
                 onFocus={() => setShowProductDropdown(true)}
+                onKeyDown={(e) => {
+                  if (!showProductDropdown || selectedProduct) return
+                  
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSelectedProductIndex(prev => 
+                      prev < filteredProducts.length - 1 ? prev + 1 : prev
+                    )
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSelectedProductIndex(prev => prev > 0 ? prev - 1 : -1)
+                  } else if (e.key === 'Enter' && selectedProductIndex >= 0) {
+                    e.preventDefault()
+                    const product = filteredProducts[selectedProductIndex]
+                    setCurrentItem({ ...currentItem, product_id: product.id, manual_price: false })
+                    setProductSearch('')
+                    setShowProductDropdown(false)
+                    setSelectedProductIndex(-1)
+                  } else if (e.key === 'Escape') {
+                    setShowProductDropdown(false)
+                    setSelectedProductIndex(-1)
+                  }
+                }}
                 placeholder="Ketik nama produk atau jenis..."
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
               />
@@ -453,15 +615,20 @@ File add-order-columns.sql ada di root project Anda.`)
               {showProductDropdown && productSearch && !selectedProduct && (
                 <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                   {filteredProducts.length > 0 ? (
-                    filteredProducts.map(product => (
+                    filteredProducts.map((product, index) => (
                       <div
                         key={product.id}
                         onClick={() => {
                           setCurrentItem({ ...currentItem, product_id: product.id, manual_price: false })
                           setProductSearch('')
                           setShowProductDropdown(false)
+                          setSelectedProductIndex(-1)
                         }}
-                        className="px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-0"
+                        className={`px-4 py-3 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-0 ${
+                          index === selectedProductIndex
+                            ? 'bg-blue-50 dark:bg-blue-900/30'
+                            : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
                       >
                         <div className="flex justify-between items-start">
                           <div>
@@ -503,7 +670,7 @@ File add-order-columns.sql ada di root project Anda.`)
               )}
             </div>
 
-            <div className="md:col-span-2">
+            <div className="md:col-span-1">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Jumlah
               </label>
@@ -511,12 +678,29 @@ File add-order-columns.sql ada di root project Anda.`)
                 type="number"
                 min="1"
                 value={currentItem.quantity}
-                onChange={(e) => setCurrentItem({ ...currentItem, quantity: parseInt(e.target.value) || 1 })}
+                onChange={(e) => {
+                  const value = e.target.value
+                  // Allow empty string for deletion, otherwise parse to number
+                  if (value === '') {
+                    setCurrentItem({ ...currentItem, quantity: '' })
+                  } else {
+                    const num = parseInt(value)
+                    if (!isNaN(num) && num > 0) {
+                      setCurrentItem({ ...currentItem, quantity: num })
+                    }
+                  }
+                }}
+                onBlur={(e) => {
+                  // Set to 1 if empty when losing focus
+                  if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                    setCurrentItem({ ...currentItem, quantity: 1 })
+                  }
+                }}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
               />
             </div>
 
-            <div className="md:col-span-3">
+            <div className="md:col-span-1">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Harga Satuan
               </label>
@@ -527,7 +711,7 @@ File add-order-columns.sql ada di root project Anda.`)
               />
             </div>
 
-            <div className="md:col-span-2">
+            <div className="md:col-span-1">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Subtotal
               </label>
@@ -537,7 +721,7 @@ File add-order-columns.sql ada di root project Anda.`)
             </div>
 
             <div className="md:col-span-1 flex items-end">
-              <Button type="button" onClick={addItem} className="w-full">
+              <Button type="button" onClick={addItem} className="w-full h-[42px]">
                 Tambah
               </Button>
             </div>
@@ -676,6 +860,28 @@ File add-order-columns.sql ada di root project Anda.`)
           </Button>
         </div>
       </form>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog({ isOpen: false, title: '', message: '', onConfirm: null })}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        type="warning"
+      />
+
+      {/* Toast Notifications */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+        {toasts.map((toast) => (
+          <Toast
+            key={toast.id}
+            message={toast.message}
+            type={toast.type}
+            onClose={() => removeToast(toast.id)}
+          />
+        ))}
+      </div>
     </div>
   )
 }

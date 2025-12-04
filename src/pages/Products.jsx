@@ -4,11 +4,14 @@ import { Plus, Edit, Trash2, AlertTriangle, Eye } from 'lucide-react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
+import { useToast } from '../context/ToastContext'
 
 export default function Products() {
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [products, setProducts] = useState([])
   const [filteredProducts, setFilteredProducts] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -16,6 +19,9 @@ export default function Products() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [productToDelete, setProductToDelete] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     type: '',
@@ -90,10 +96,61 @@ export default function Products() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (id) => {
-    if (confirm('Yakin ingin menghapus produk ini?')) {
-      await supabase.from('products').delete().eq('id', id)
+  const confirmDelete = (product) => {
+    setProductToDelete(product)
+    setShowDeleteConfirm(true)
+  }
+
+  const handleDelete = async () => {
+    if (!productToDelete || deleteLoading) return
+
+    try {
+      setDeleteLoading(true)
+
+      // Check if product is used in orders
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('id')
+        .eq('product_id', productToDelete.id)
+        .limit(1)
+
+      if (orderItems && orderItems.length > 0) {
+        showToast('Produk tidak dapat dihapus karena sudah digunakan dalam order', 'error')
+        setShowDeleteConfirm(false)
+        setProductToDelete(null)
+        return
+      }
+
+      // Delete product
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', productToDelete.id)
+
+      if (error) throw error
+
+      // Log activity
+      try {
+        await supabase.from('activity_logs').insert({
+          user_name: 'Admin',
+          action: 'delete',
+          entity_type: 'product',
+          entity_name: productToDelete.name,
+          description: `Menghapus produk "${productToDelete.name}"`,
+          created_at: new Date().toISOString()
+        })
+      } catch (logError) {
+        console.error('Failed to log activity:', logError)
+      }
+
+      showToast(`Produk "${productToDelete.name}" berhasil dihapus`, 'success')
+      setShowDeleteConfirm(false)
+      setProductToDelete(null)
       loadProducts()
+    } catch (error) {
+      showToast(error.message || 'Gagal menghapus produk', 'error')
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -243,7 +300,7 @@ export default function Products() {
                         <Edit className="w-5 h-5" />
                       </button>
                       <button 
-                        onClick={() => handleDelete(product.id)} 
+                        onClick={() => confirmDelete(product)} 
                         className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                         title="Hapus"
                       >
@@ -338,6 +395,19 @@ export default function Products() {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => !deleteLoading && setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Hapus Produk"
+        message={`Apakah Anda yakin ingin menghapus produk "${productToDelete?.name}"? Tindakan ini tidak dapat dibatalkan.`}
+        confirmText="Ya, Hapus"
+        cancelText="Batal"
+        type="danger"
+        loading={deleteLoading}
+      />
     </div>
   )
 }

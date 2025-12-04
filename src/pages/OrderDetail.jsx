@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import Invoice from '../components/Invoice'
+import CurrencyInput from '../components/CurrencyInput'
 import { formatCurrency } from '../lib/utils'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
@@ -109,28 +110,34 @@ export default function OrderDetail() {
   }
 
   async function handleAddPayment() {
-    if (paymentAmount <= 0) {
-      showToast('Masukkan jumlah pembayaran', 'error')
+    if (!paymentAmount || paymentAmount <= 0) {
+      showToast('Masukkan jumlah pembayaran yang valid', 'error')
       return
     }
 
     try {
       const totalPaid = order.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0)
-      const newTotalPaid = totalPaid + paymentAmount
+      const newTotalPaid = totalPaid + parseFloat(paymentAmount)
       const remaining = parseFloat(order.total_amount) - newTotalPaid
+
+      const paymentData = {
+        order_id: orderId,
+        amount: parseFloat(paymentAmount),
+        payment_method: paymentMethod,
+        notes: paymentNotes || null
+      }
+
+      console.log('Sending payment data:', paymentData)
 
       // Add payment
       const { error: paymentError } = await supabase
         .from('payments')
-        .insert({
-          order_id: orderId,
-          store_id: order.store_id,
-          amount: paymentAmount,
-          payment_method: paymentMethod,
-          notes: paymentNotes
-        })
+        .insert(paymentData)
 
-      if (paymentError) throw paymentError
+      if (paymentError) {
+        console.error('Payment error:', paymentError)
+        throw paymentError
+      }
 
       // Update order payment status
       let newPaymentStatus = 'paid'
@@ -528,19 +535,17 @@ export default function OrderDetail() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Jumlah Pembayaran
                 </label>
-                <input
-                  type="number"
+                <CurrencyInput
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
-                  max={remaining}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                  onChange={(value) => setPaymentAmount(value)}
+                  className="w-full"
                 />
                 <button
                   type="button"
                   onClick={() => setPaymentAmount(remaining)}
-                  className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 mt-1"
+                  className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-2 font-medium"
                 >
-                  Bayar Penuh
+                  💰 Bayar Penuh ({formatCurrency(remaining)})
                 </button>
               </div>
 
@@ -576,7 +581,10 @@ export default function OrderDetail() {
             <Button variant="secondary" onClick={() => setShowPaymentModal(false)}>
               Batal
             </Button>
-            <Button onClick={handleAddPayment}>
+            <Button 
+              onClick={handleAddPayment}
+              disabled={!paymentAmount || paymentAmount <= 0}
+            >
               Simpan Pembayaran
             </Button>
           </div>

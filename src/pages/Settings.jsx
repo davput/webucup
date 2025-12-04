@@ -1,12 +1,24 @@
 import { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, User, Bell, Shield, Database, Palette, Save, Moon, Sun, Monitor } from 'lucide-react'
+import { Settings as SettingsIcon, User, Bell, Shield, Database, Palette, Save, Moon, Sun, Monitor, Plus, Edit, Trash2, Package, MapPin, DollarSign, Hash } from 'lucide-react'
 import Card from '../components/Card'
 import Button from '../components/Button'
+import Modal from '../components/Modal'
 import { useToast } from '../hooks/useToast'
+import { supabase } from '../lib/supabase'
 
 export default function Settings() {
   const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState('general')
+  
+  // Master Data States
+  const [productTypes, setProductTypes] = useState([])
+  const [districts, setDistricts] = useState([])
+  const [units, setUnits] = useState([])
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [modalType, setModalType] = useState('')
+  const [editingItem, setEditingItem] = useState(null)
+  const [formValue, setFormValue] = useState('')
+  
   const [settings, setSettings] = useState({
     // General
     companyName: 'Distribusi Pupuk',
@@ -32,17 +44,158 @@ export default function Settings() {
     // System
     backupFrequency: 'daily',
     dataRetention: 365,
-    enableAuditLog: true
+    enableAuditLog: true,
+    
+    // Pricing (from system_settings table)
+    default_margin: 20,
+    wholesale_min_quantity: 10,
+    wholesale_discount: 10,
+    
+    // Stock (from system_settings table)
+    minimum_stock_global: 5,
+    enable_low_stock_notification: true,
+    enable_stock_movement_notification: true,
+    
+    // Numbering (from system_settings table)
+    order_number_format: 'ORD-{YYYY}{MM}{DD}-{####}',
+    delivery_number_format: 'DEL-{YYYY}{MM}{DD}-{####}',
+    payment_number_format: 'PAY-{YYYY}{MM}{DD}-{####}',
+    invoice_number_format: 'INV-{YYYY}{MM}{DD}-{####}'
   })
 
   useEffect(() => {
     loadSettings()
+    loadMasterData()
   }, [])
 
-  const loadSettings = () => {
+  const loadSettings = async () => {
+    // Load from localStorage
     const saved = localStorage.getItem('appSettings')
     if (saved) {
-      setSettings({ ...settings, ...JSON.parse(saved) })
+      setSettings(prev => ({ ...prev, ...JSON.parse(saved) }))
+    }
+    
+    // Load from system_settings table
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('*')
+      
+      if (error) throw error
+
+      // Convert array to object
+      const settingsObj = {}
+      data?.forEach(item => {
+        let value = item.setting_value
+        if (item.setting_type === 'number') {
+          value = parseFloat(value)
+        } else if (item.setting_type === 'boolean') {
+          value = value === 'true'
+        }
+        settingsObj[item.setting_key] = value
+      })
+
+      setSettings(prev => ({ ...prev, ...settingsObj }))
+    } catch (error) {
+      console.error('Error loading system settings:', error)
+    }
+  }
+
+  const loadMasterData = async () => {
+    try {
+      // Load product types
+      const { data: typesData } = await supabase
+        .from('product_types')
+        .select('*')
+        .order('name')
+      setProductTypes(typesData || [])
+
+      // Load districts
+      const { data: districtsData } = await supabase
+        .from('districts')
+        .select('*')
+        .order('name')
+      setDistricts(districtsData || [])
+
+      // Load units
+      const { data: unitsData } = await supabase
+        .from('units')
+        .select('*')
+        .order('name')
+      setUnits(unitsData || [])
+    } catch (error) {
+      console.error('Error loading master data:', error)
+      showToast('Gagal memuat master data', 'error')
+    }
+  }
+
+  const openAddModal = (type) => {
+    setModalType(type)
+    setEditingItem(null)
+    setFormValue('')
+    setIsModalOpen(true)
+  }
+
+  const openEditModal = (type, item) => {
+    setModalType(type)
+    setEditingItem(item)
+    setFormValue(item.name)
+    setIsModalOpen(true)
+  }
+
+  const handleMasterDataSubmit = async () => {
+    if (!formValue.trim()) {
+      showToast('Nilai tidak boleh kosong', 'error')
+      return
+    }
+
+    try {
+      const tableName = modalType === 'productType' ? 'product_types' : 
+                       modalType === 'district' ? 'districts' : 'units'
+
+      if (editingItem !== null) {
+        // Update existing
+        const { error } = await supabase
+          .from(tableName)
+          .update({ name: formValue })
+          .eq('id', editingItem.id)
+
+        if (error) throw error
+        showToast('Data berhasil diupdate', 'success')
+      } else {
+        // Insert new
+        const { error } = await supabase
+          .from(tableName)
+          .insert([{ name: formValue }])
+
+        if (error) throw error
+        showToast('Data berhasil ditambahkan', 'success')
+      }
+
+      setIsModalOpen(false)
+      loadMasterData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }
+
+  const handleDelete = async (type, item) => {
+    if (!confirm('Yakin ingin menghapus item ini?')) return
+
+    try {
+      const tableName = type === 'productType' ? 'product_types' : 
+                       type === 'district' ? 'districts' : 'units'
+
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq('id', item.id)
+
+      if (error) throw error
+      showToast('Data berhasil dihapus', 'success')
+      loadMasterData()
+    } catch (error) {
+      showToast(error.message, 'error')
     }
   }
 
@@ -73,9 +226,13 @@ export default function Settings() {
 
   const tabs = [
     { id: 'general', label: 'Umum', icon: SettingsIcon },
+    { id: 'pricing', label: 'Harga', icon: DollarSign },
+    { id: 'stock', label: 'Stok', icon: Package },
+    { id: 'numbering', label: 'Penomoran', icon: Hash },
     { id: 'appearance', label: 'Tampilan', icon: Palette },
     { id: 'notifications', label: 'Notifikasi', icon: Bell },
     { id: 'business', label: 'Bisnis', icon: Database },
+    { id: 'masterdata', label: 'Master Data', icon: MapPin },
     { id: 'security', label: 'Keamanan', icon: Shield }
   ]
 
@@ -376,6 +533,122 @@ export default function Settings() {
                 </div>
               )}
 
+              {/* Master Data Settings */}
+              {activeTab === 'masterdata' && (
+                <div className="space-y-6">
+                  {/* Product Types */}
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+                        <Package className="w-5 h-5 mr-2" />
+                        Jenis Produk
+                      </h3>
+                      <Button onClick={() => openAddModal('productType')} size="sm">
+                        <Plus className="w-4 h-4 mr-1" />
+                        Tambah
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {productTypes.map((type) => (
+                        <div key={type.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-900 dark:text-gray-100 font-medium">{type.name}</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openEditModal('productType', type)}
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete('productType', type)}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Districts */}
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+                        <MapPin className="w-5 h-5 mr-2" />
+                        Kecamatan
+                      </h3>
+                      <Button onClick={() => openAddModal('district')} size="sm">
+                        <Plus className="w-4 h-4 mr-1" />
+                        Tambah
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {districts.map((district) => (
+                        <div key={district.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-900 dark:text-gray-100 font-medium">{district.name}</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openEditModal('district', district)}
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete('district', district)}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Units */}
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+                        <Database className="w-5 h-5 mr-2" />
+                        Satuan
+                      </h3>
+                      <Button onClick={() => openAddModal('unit')} size="sm">
+                        <Plus className="w-4 h-4 mr-1" />
+                        Tambah
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {units.map((unit) => (
+                        <div key={unit.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-900 dark:text-gray-100 font-medium">{unit.name}</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openEditModal('unit', unit)}
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete('unit', unit)}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-blue-800 dark:text-blue-300">
+                      <strong>Info:</strong> Master data ini akan digunakan di seluruh aplikasi untuk dropdown dan pilihan data.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Security Settings */}
               {activeTab === 'security' && (
                 <div className="space-y-6">
@@ -451,6 +724,45 @@ export default function Settings() {
           </Card>
         </div>
       </div>
+
+      {/* Modal for Master Data */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title={
+          editingItem !== null
+            ? `Edit ${modalType === 'productType' ? 'Jenis Produk' : modalType === 'district' ? 'Kecamatan' : 'Satuan'}`
+            : `Tambah ${modalType === 'productType' ? 'Jenis Produk' : modalType === 'district' ? 'Kecamatan' : 'Satuan'}`
+        }
+      >
+        <div className="p-6">
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              {modalType === 'productType' ? 'Nama Jenis Produk' : modalType === 'district' ? 'Nama Kecamatan' : 'Nama Satuan'}
+            </label>
+            <input
+              type="text"
+              value={formValue}
+              onChange={(e) => setFormValue(e.target.value)}
+              placeholder={
+                modalType === 'productType' ? 'Contoh: Urea' :
+                modalType === 'district' ? 'Contoh: Cibinong' :
+                'Contoh: Karung'
+              }
+              className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+              onKeyPress={(e) => e.key === 'Enter' && handleMasterDataSubmit()}
+            />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleMasterDataSubmit}>
+              {editingItem !== null ? 'Update' : 'Tambah'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

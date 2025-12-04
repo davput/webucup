@@ -30,15 +30,33 @@ export default function OrderManagement() {
 
   useEffect(() => {
     fetchStores()
+    fetchOrders()
   }, [])
 
+  // Only refetch when non-search filters change
   useEffect(() => {
-    if (stores.length > 0 || filters.status || filters.payment_status || filters.store_id || filters.date_from || filters.date_to || filters.search) {
-      fetchOrders()
-    } else {
-      fetchOrders()
+    const { search, ...otherFilters } = filters
+    const hasOtherFilters = Object.values(otherFilters).some(v => v !== '')
+    
+    if (hasOtherFilters) {
+      const timeoutId = setTimeout(() => {
+        fetchOrders()
+      }, 300)
+      return () => clearTimeout(timeoutId)
     }
-  }, [filters])
+  }, [filters.status, filters.payment_status, filters.store_id, filters.date_from, filters.date_to])
+
+  // Client-side filtering for search
+  const filteredOrders = orders.filter(order => {
+    // Search filter (client-side)
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase()
+      const matchOrderNumber = order.order_number?.toLowerCase().includes(searchLower)
+      const matchStoreName = order.stores?.name?.toLowerCase().includes(searchLower)
+      if (!matchOrderNumber && !matchStoreName) return false
+    }
+    return true
+  })
 
   async function fetchStores() {
     const { data } = await supabase
@@ -413,8 +431,8 @@ export default function OrderManagement() {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <Table 
           columns={columns}
-          data={orders}
-          emptyMessage="Belum ada order. Klik tombol 'Buat Order Baru' untuk membuat order pertama."
+          data={filteredOrders}
+          emptyMessage={filters.search ? "Tidak ada order yang sesuai dengan pencarian" : "Belum ada order. Klik tombol 'Buat Order Baru' untuk membuat order pertama."}
         />
       </div>
     </div>

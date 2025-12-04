@@ -1,10 +1,18 @@
 import { useState } from 'react'
 
 export function useToast() {
-  const [toast, setToast] = useState(null)
+  const [toasts, setToasts] = useState([])
 
   const showToast = (message, type = 'success') => {
-    setToast({ message, type })
+    const id = Date.now()
+    const newToast = { id, message, type }
+    
+    setToasts(prev => [...prev, newToast])
+    
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+      removeToast(id)
+    }, 3000)
   }
 
   const showSuccess = (message) => {
@@ -23,17 +31,17 @@ export function useToast() {
     showToast(message, 'info')
   }
 
-  const hideToast = () => {
-    setToast(null)
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id))
   }
 
   return {
-    toast,
+    toasts,
     showToast,
     showSuccess,
     showError,
     showWarning,
     showInfo,
-    hideToast
+    removeToast
   }
 }

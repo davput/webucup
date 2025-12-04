@@ -259,49 +259,76 @@ export default function ProductDetail() {
       </div>
 
       {/* Stock Logs */}
-      <Card title="Riwayat Stok">
+      <Card title="Riwayat Stok (20 Terakhir)">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Tanggal</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Tipe</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Jumlah</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Stok Sebelum</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Stok Sesudah</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Catatan</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tanggal & Waktu</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tipe</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Perubahan</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Stok Awal</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Stok Akhir</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Keterangan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {stockLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                    {format(new Date(log.created_at), 'dd MMM yyyy HH:mm', { locale: id })}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                      log.type === 'in' 
-                        ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400'
-                        : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400'
-                    }`}>
-                      {log.type === 'in' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                      {log.type === 'in' ? 'Masuk' : 'Keluar'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {log.quantity}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {log.stock_before}
-                  </td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {log.stock_after}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {log.notes || '-'}
+              {stockLogs.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                    Belum ada riwayat stok
                   </td>
                 </tr>
-              ))}
+              ) : (
+                stockLogs.map((log) => {
+                  // Calculate absolute quantity for display
+                  const displayQuantity = Math.abs(log.quantity)
+                  const isStockIn = log.type === 'in'
+                  
+                  return (
+                    <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-400" />
+                          {format(new Date(log.created_at), 'dd MMM yyyy HH:mm', { locale: id })}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                          isStockIn
+                            ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400'
+                            : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400'
+                        }`}>
+                          {isStockIn ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {isStockIn ? 'Masuk' : 'Keluar'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-sm font-semibold ${
+                          isStockIn 
+                            ? 'text-green-600 dark:text-green-400' 
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {isStockIn ? '+' : '-'}{displayQuantity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        {log.stock_before}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {log.stock_after}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        <div className="max-w-xs truncate" title={log.notes}>
+                          {log.notes || '-'}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>

@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Button from '../components/Button'
-import Modal from '../components/Modal'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { formatCurrency } from '../lib/utils'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
 import { DELIVERY_STATUS_LABELS, DELIVERY_STATUS_COLORS } from '../lib/constants'
-import { useToast } from '../hooks/useToast'
+import { useToast } from '../context/ToastContext'
 
 export default function DeliveryDetail() {
   const { id: deliveryId } = useParams()
@@ -15,7 +15,14 @@ export default function DeliveryDetail() {
   const { showToast } = useToast()
   const [delivery, setDelivery] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
+  
+  // Confirm dialogs
+  const [showStartConfirm, setShowStartConfirm] = useState(false)
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showMarkDeliveredConfirm, setShowMarkDeliveredConfirm] = useState(false)
+  const [selectedDeliveryOrder, setSelectedDeliveryOrder] = useState(null)
 
   useEffect(() => {
     fetchDelivery()
@@ -23,6 +30,12 @@ export default function DeliveryDetail() {
 
   async function fetchDelivery() {
     try {
+      setLoading(true)
+      
+      if (!deliveryId) {
+        throw new Error('ID pengiriman tidak valid')
+      }
+
       const { data, error } = await supabase
         .from('deliveries')
         .select(`
@@ -47,7 +60,16 @@ export default function DeliveryDetail() {
         .eq('id', deliveryId)
         .single()
 
-      if (error) throw error
+      if (error) {
+        if (error.code === 'PGRST116') {
+          throw new Error('Pengiriman tidak ditemukan')
+        }
+        throw error
+      }
+
+      if (!data) {
+        throw new Error('Data pengiriman tidak ditemukan')
+      }
 
       // Sort delivery_orders by route_order
       if (data.delivery_orders) {
@@ -56,55 +78,92 @@ export default function DeliveryDetail() {
 
       setDelivery(data)
     } catch (error) {
-      console.error('Error:', error)
-      showToast('Gagal memuat data pengiriman', 'error')
+      showToast(error.message || 'Gagal memuat data pengiriman', 'error')
+      setDelivery(null)
     } finally {
       setLoading(false)
     }
   }
 
   async function handleStartDelivery() {
+    if (actionLoading) return
+    
     try {
+      setActionLoading(true)
+
+      // Validasi status
+      if (delivery.status !== 'scheduled') {
+        throw new Error('Pengiriman hanya bisa dimulai dari status terjadwal')
+      }
+
+      // Validasi ada order
+      if (!delivery.delivery_orders || delivery.delivery_orders.length === 0) {
+        throw new Error('Tidak ada order dalam pengiriman ini')
+      }
+
+      // Validasi driver
+      if (!delivery.driver_id) {
+        throw new Error('Pengiriman harus memiliki sopir')
+      }
+
       // Update delivery status
-      await supabase
+      const { error: deliveryError } = await supabase
         .from('deliveries')
-        .update({ status: 'on_delivery' })
+        .update({ 
+          status: 'on_delivery',
+          started_at: new Date().toISOString()
+        })
         .eq('id', deliveryId)
+
+      if (deliveryError) throw deliveryError
 
       // Update all orders status
       const orderIds = delivery.delivery_orders.map(d => d.order_id)
-      await supabase
+      const { error: ordersError } = await supabase
         .from('orders')
         .update({ status: 'on_delivery' })
         .in('id', orderIds)
 
+      if (ordersError) throw ordersError
+
       // Update delivery_orders status
-      await supabase
+      const { error: deliveryOrdersError } = await supabase
         .from('delivery_orders')
         .update({ delivery_status: 'on_delivery' })
         .eq('delivery_id', deliveryId)
+
+      if (deliveryOrdersError) throw deliveryOrdersError
 
       // Reduce stock for all products
       for (const deliveryOrder of delivery.delivery_orders) {
         for (const item of deliveryOrder.orders.order_items) {
           // Get current stock
-          const { data: product } = await supabase
+          const { data: product, error: productError } = await supabase
             .from('products')
             .select('stock')
             .eq('id', item.product_id)
             .single()
 
+          if (productError) throw productError
+
           const stockBefore = product.stock
           const stockAfter = stockBefore - item.quantity
 
+          // Validasi stok cukup
+          if (stockAfter < 0) {
+            throw new Error(`Stok ${item.products.name} tidak mencukupi`)
+          }
+
           // Update stock
-          await supabase
+          const { error: updateStockError } = await supabase
             .from('products')
             .update({ stock: stockAfter })
             .eq('id', item.product_id)
 
+          if (updateStockError) throw updateStockError
+
           // Create stock log
-          await supabase
+          const { error: logError } = await supabase
             .from('stock_logs')
             .insert({
               product_id: item.product_id,
@@ -116,70 +175,173 @@ export default function DeliveryDetail() {
               reference_id: deliveryId,
               notes: `Pengiriman ${delivery.delivery_number}`
             })
+
+          if (logError) throw logError
         }
       }
 
-      showToast('Pengiriman dimulai', 'success')
+      showToast('Pengiriman berhasil dimulai', 'success')
+      setShowStartConfirm(false)
       fetchDelivery()
     } catch (error) {
-      showToast(error.message, 'error')
+      showToast(error.message || 'Gagal memulai pengiriman', 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  function confirmMarkAsDelivered(deliveryOrderId, orderId) {
+    setSelectedDeliveryOrder({ deliveryOrderId, orderId })
+    setShowMarkDeliveredConfirm(true)
+  }
+
+  async function handleMarkAsDelivered() {
+    if (actionLoading || !selectedDeliveryOrder) return
+    
+    try {
+      setActionLoading(true)
+
+      const { deliveryOrderId, orderId } = selectedDeliveryOrder
+
+      // Validasi status pengiriman
+      if (delivery.status !== 'on_delivery') {
+        throw new Error('Order hanya bisa ditandai terkirim saat pengiriman sedang berlangsung')
+      }
+
+      // Update delivery_order status
+      const { error: deliveryOrderError } = await supabase
+        .from('delivery_orders')
+        .update({ 
+          delivery_status: 'delivered',
+          delivered_at: new Date().toISOString()
+        })
+        .eq('id', deliveryOrderId)
+
+      if (deliveryOrderError) throw deliveryOrderError
+
+      // Update order status
+      const { error: orderError } = await supabase
+        .from('orders')
+        .update({ status: 'delivered' })
+        .eq('id', orderId)
+
+      if (orderError) throw orderError
+
+      showToast('Order berhasil ditandai terkirim', 'success')
+      setShowMarkDeliveredConfirm(false)
+      setSelectedDeliveryOrder(null)
+      fetchDelivery()
+    } catch (error) {
+      showToast(error.message || 'Gagal menandai order terkirim', 'error')
+    } finally {
+      setActionLoading(false)
     }
   }
 
   async function handleCompleteDelivery() {
+    if (actionLoading) return
+    
     try {
+      setActionLoading(true)
+
+      // Validasi status
+      if (delivery.status !== 'on_delivery') {
+        throw new Error('Pengiriman hanya bisa diselesaikan dari status sedang dikirim')
+      }
+
       // Check if all orders are delivered
       const allDelivered = delivery.delivery_orders.every(d => d.delivery_status === 'delivered')
       
       if (!allDelivered) {
-        showToast('Semua order harus sudah terkirim', 'error')
-        return
+        const pendingCount = delivery.delivery_orders.filter(d => d.delivery_status !== 'delivered').length
+        throw new Error(`Masih ada ${pendingCount} order yang belum terkirim`)
       }
 
       // Update delivery status
-      await supabase
+      const { error } = await supabase
         .from('deliveries')
-        .update({ status: 'delivered' })
+        .update({ 
+          status: 'delivered',
+          completed_at: new Date().toISOString()
+        })
         .eq('id', deliveryId)
 
-      showToast('Pengiriman selesai', 'success')
+      if (error) throw error
+
+      showToast('Pengiriman berhasil diselesaikan', 'success')
+      setShowCompleteConfirm(false)
       fetchDelivery()
     } catch (error) {
-      showToast(error.message, 'error')
+      showToast(error.message || 'Gagal menyelesaikan pengiriman', 'error')
+    } finally {
+      setActionLoading(false)
     }
   }
 
   async function handleCancelDelivery() {
+    if (actionLoading) return
+    
     try {
+      setActionLoading(true)
+
+      // Validasi status
+      if (delivery.status !== 'scheduled') {
+        throw new Error('Hanya pengiriman terjadwal yang bisa dibatalkan')
+      }
+
       // Update delivery status
-      await supabase
+      const { error: deliveryError } = await supabase
         .from('deliveries')
-        .update({ status: 'cancelled' })
+        .update({ 
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString()
+        })
         .eq('id', deliveryId)
+
+      if (deliveryError) throw deliveryError
 
       // Update orders back to pending_delivery
       const orderIds = delivery.delivery_orders.map(d => d.order_id)
-      await supabase
+      const { error: ordersError } = await supabase
         .from('orders')
         .update({ status: 'pending_delivery' })
         .in('id', orderIds)
 
-      showToast('Pengiriman dibatalkan', 'success')
-      setShowCancelModal(false)
+      if (ordersError) throw ordersError
+
+      // Update delivery_orders status
+      const { error: deliveryOrdersError } = await supabase
+        .from('delivery_orders')
+        .update({ delivery_status: 'cancelled' })
+        .eq('delivery_id', deliveryId)
+
+      if (deliveryOrdersError) throw deliveryOrdersError
+
+      showToast('Pengiriman berhasil dibatalkan', 'success')
+      setShowCancelConfirm(false)
       fetchDelivery()
     } catch (error) {
-      showToast(error.message, 'error')
+      showToast(error.message || 'Gagal membatalkan pengiriman', 'error')
+    } finally {
+      setActionLoading(false)
     }
   }
 
   function printDeliveryNote() {
-    window.print()
+    try {
+      window.print()
+    } catch (error) {
+      showToast('Gagal mencetak surat jalan', 'error')
+    }
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500 dark:text-gray-400">Memuat data...</div>
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="text-gray-500 dark:text-gray-400">Memuat data pengiriman...</div>
+        </div>
       </div>
     )
   }
@@ -219,17 +381,27 @@ export default function DeliveryDetail() {
           </Button>
           {delivery.status === 'scheduled' && (
             <>
-              <Button onClick={handleStartDelivery}>
-                Mulai Pengiriman
+              <Button 
+                onClick={() => setShowStartConfirm(true)}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Memproses...' : 'Mulai Pengiriman'}
               </Button>
-              <Button variant="danger" onClick={() => setShowCancelModal(true)}>
+              <Button 
+                variant="danger" 
+                onClick={() => setShowCancelConfirm(true)}
+                disabled={actionLoading}
+              >
                 Batalkan
               </Button>
             </>
           )}
           {delivery.status === 'on_delivery' && (
-            <Button onClick={handleCompleteDelivery}>
-              Selesaikan Pengiriman
+            <Button 
+              onClick={() => setShowCompleteConfirm(true)}
+              disabled={actionLoading}
+            >
+              {actionLoading ? 'Memproses...' : 'Selesaikan Pengiriman'}
             </Button>
           )}
         </div>
@@ -379,6 +551,18 @@ export default function DeliveryDetail() {
                             {deliveryOrder.recipient_name && ` - Diterima oleh: ${deliveryOrder.recipient_name}`}
                           </div>
                         )}
+
+                        {delivery.status === 'on_delivery' && deliveryOrder.delivery_status !== 'delivered' && (
+                          <div className="mt-3">
+                            <Button 
+                              size="sm" 
+                              onClick={() => confirmMarkAsDelivered(deliveryOrder.id, order.id)}
+                              disabled={actionLoading}
+                            >
+                              ✓ Tandai Terkirim
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -440,26 +624,54 @@ export default function DeliveryDetail() {
         </div>
       </div>
 
-      {/* Cancel Modal */}
-      <Modal
-        isOpen={showCancelModal}
-        onClose={() => setShowCancelModal(false)}
+      {/* Confirm Dialogs */}
+      <ConfirmDialog
+        isOpen={showStartConfirm}
+        onClose={() => !actionLoading && setShowStartConfirm(false)}
+        onConfirm={handleStartDelivery}
+        title="Mulai Pengiriman"
+        message="Apakah Anda yakin ingin memulai pengiriman ini? Stok produk akan dikurangi dan status order akan diubah."
+        confirmText="Ya, Mulai Pengiriman"
+        cancelText="Batal"
+        type="info"
+        loading={actionLoading}
+      />
+
+      <ConfirmDialog
+        isOpen={showMarkDeliveredConfirm}
+        onClose={() => !actionLoading && setShowMarkDeliveredConfirm(false)}
+        onConfirm={handleMarkAsDelivered}
+        title="Tandai Terkirim"
+        message="Apakah Anda yakin order ini sudah terkirim ke toko?"
+        confirmText="Ya, Sudah Terkirim"
+        cancelText="Belum"
+        type="success"
+        loading={actionLoading}
+      />
+
+      <ConfirmDialog
+        isOpen={showCompleteConfirm}
+        onClose={() => !actionLoading && setShowCompleteConfirm(false)}
+        onConfirm={handleCompleteDelivery}
+        title="Selesaikan Pengiriman"
+        message="Apakah Anda yakin ingin menyelesaikan pengiriman ini? Pastikan semua order sudah terkirim."
+        confirmText="Ya, Selesaikan"
+        cancelText="Batal"
+        type="success"
+        loading={actionLoading}
+      />
+
+      <ConfirmDialog
+        isOpen={showCancelConfirm}
+        onClose={() => !actionLoading && setShowCancelConfirm(false)}
+        onConfirm={handleCancelDelivery}
         title="Batalkan Pengiriman"
-      >
-        <div className="p-6">
-          <p className="text-gray-700 dark:text-gray-300 mb-6">
-            Apakah Anda yakin ingin membatalkan pengiriman ini? Semua order akan dikembalikan ke status menunggu pengiriman.
-          </p>
-          <div className="flex justify-end gap-4">
-            <Button variant="secondary" onClick={() => setShowCancelModal(false)}>
-              Batal
-            </Button>
-            <Button variant="danger" onClick={handleCancelDelivery}>
-              Ya, Batalkan Pengiriman
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        message="Apakah Anda yakin ingin membatalkan pengiriman ini? Semua order akan dikembalikan ke status menunggu pengiriman."
+        confirmText="Ya, Batalkan"
+        cancelText="Tidak"
+        type="danger"
+        loading={actionLoading}
+      />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import Card from '../components/Card'
 import { supabase } from '../lib/supabase'
 
 export default function Dashboard() {
+  const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
     totalStock: 0,
     totalStores: 0,
@@ -18,14 +19,56 @@ export default function Dashboard() {
   const [salesData, setSalesData] = useState([])
   const [lowStockProducts, setLowStockProducts] = useState([])
   const [topProducts, setTopProducts] = useState([])
+  const [widgetSettings, setWidgetSettings] = useState({
+    stats: true,
+    'sales-chart': true,
+    'low-stock': true,
+    'top-products': true,
+    'recent-orders': false,
+    'recent-deliveries': false
+  })
 
   useEffect(() => {
     loadDashboardData()
+    loadWidgetSettings()
+    
+    // Listen for widget settings updates
+    const handleWidgetUpdate = () => {
+      loadWidgetSettings()
+    }
+    window.addEventListener('dashboardWidgetsUpdated', handleWidgetUpdate)
+    
+    return () => {
+      window.removeEventListener('dashboardWidgetsUpdated', handleWidgetUpdate)
+    }
   }, [])
 
+  async function loadWidgetSettings() {
+    try {
+      const { data } = await supabase
+        .from('system_settings')
+        .select('setting_value')
+        .eq('setting_key', 'dashboard_widgets')
+        .single()
+
+      if (data?.setting_value) {
+        const widgets = JSON.parse(data.setting_value)
+        const settings = {}
+        widgets.forEach(w => {
+          settings[w.id] = w.enabled
+        })
+        setWidgetSettings(settings)
+      }
+    } catch (error) {
+      console.error('Error loading widget settings:', error)
+    }
+  }
+
   const loadDashboardData = async () => {
-    // Load all products
-    const { data: allProducts } = await supabase.from('products').select('*')
+    setLoading(true)
+    try {
+      // Load all products
+      const { data: allProducts } = await supabase.from('products').select('*')
     
     // Total stok
     const totalStock = allProducts?.reduce((sum, p) => sum + p.stock, 0) || 0
@@ -71,16 +114,57 @@ export default function Dashboard() {
       .slice(0, 5)
     setTopProducts(topByStock)
 
-    // Data penjualan bulanan (mock data untuk demo)
-    setSalesData([
-      { month: 'Jan', sales: 4000 },
-      { month: 'Feb', sales: 3000 },
-      { month: 'Mar', sales: 5000 },
-      { month: 'Apr', sales: 4500 },
-      { month: 'Mei', sales: 6000 },
-      { month: 'Jun', sales: 5500 },
-    ])
+      // Data penjualan bulanan (mock data untuk demo)
+      setSalesData([
+        { month: 'Jan', sales: 4000 },
+        { month: 'Feb', sales: 3000 },
+        { month: 'Mar', sales: 5000 },
+        { month: 'Apr', sales: 4500 },
+        { month: 'Mei', sales: 6000 },
+        { month: 'Jun', sales: 5500 },
+      ])
+    } catch (error) {
+      console.error('Error loading dashboard:', error)
+    } finally {
+      setLoading(false)
+    }
   }
+
+  // Skeleton Component
+  const SkeletonCard = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 animate-pulse">
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-24 mb-3"></div>
+          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-16 mb-2"></div>
+          <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
+        </div>
+        <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-lg"></div>
+      </div>
+    </div>
+  )
+
+  const SkeletonList = () => (
+    <div className="space-y-3">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg animate-pulse">
+          <div className="flex justify-between items-center">
+            <div className="flex-1">
+              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-32 mb-2"></div>
+              <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
+            </div>
+            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-16"></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
+  const SkeletonChart = () => (
+    <div className="h-64 lg:h-80 bg-gray-50 dark:bg-gray-800 rounded-lg animate-pulse flex items-center justify-center">
+      <div className="text-gray-400 dark:text-gray-600">Loading chart...</div>
+    </div>
+  )
 
   return (
     <div>
@@ -89,23 +173,65 @@ export default function Dashboard() {
         <p className="text-gray-600 dark:text-gray-400 mt-2">Ringkasan statistik dan performa distribusi pupuk</p>
       </div>
 
-      {/* Stats Cards - Row 1 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-4 lg:mb-6">
-        <StatCard title="Total Produk" value={stats.totalProducts} icon={Package} color="blue" subtitle={`${stats.activeProducts} aktif`} />
-        <StatCard title="Total Stok" value={stats.totalStock} icon={Package} color="green" subtitle="karung" />
-        <StatCard title="Stok Rendah" value={stats.lowStockCount} icon={Package} color="red" subtitle="perlu restock" />
-        <StatCard title="Total Toko" value={stats.totalStores} icon={Store} color="purple" />
-      </div>
+      {loading ? (
+        <>
+          {/* Skeleton Stats Cards - Row 1 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-4 lg:mb-6">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
 
-      {/* Stats Cards - Row 2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 lg:gap-6 mb-6 lg:mb-8">
-        <StatCard title="Order Hari Ini" value={stats.todayOrders} icon={ShoppingCart} color="yellow" />
-        <StatCard title="Pengiriman Hari Ini" value={stats.todayDeliveries} icon={Truck} color="orange" />
-      </div>
+          {/* Skeleton Stats Cards - Row 2 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 lg:gap-6 mb-6 lg:mb-8">
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
-        {/* Stok Menipis */}
-        <Card title="⚠️ Stok Menipis">
+          {/* Skeleton Lists */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
+            <Card title="⚠️ Stok Menipis">
+              <SkeletonList />
+            </Card>
+            <Card title="📦 Stok Terbanyak">
+              <SkeletonList />
+            </Card>
+            <Card title="📊 Distribusi Jenis">
+              <SkeletonList />
+            </Card>
+          </div>
+
+          {/* Skeleton Chart */}
+          <div className="grid grid-cols-1 gap-4 lg:gap-6">
+            <Card title="Penjualan Bulanan">
+              <SkeletonChart />
+            </Card>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Stats Cards */}
+          {widgetSettings.stats && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-4 lg:mb-6">
+                <StatCard title="Total Produk" value={stats.totalProducts} icon={Package} color="blue" subtitle={`${stats.activeProducts} aktif`} />
+                <StatCard title="Total Stok" value={stats.totalStock} icon={Package} color="green" subtitle="karung" />
+                <StatCard title="Stok Rendah" value={stats.lowStockCount} icon={Package} color="red" subtitle="perlu restock" />
+                <StatCard title="Total Toko" value={stats.totalStores} icon={Store} color="purple" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 lg:gap-6 mb-6 lg:mb-8">
+                <StatCard title="Order Hari Ini" value={stats.todayOrders} icon={ShoppingCart} color="yellow" />
+                <StatCard title="Pengiriman Hari Ini" value={stats.todayDeliveries} icon={Truck} color="orange" />
+              </div>
+            </>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
+            {/* Stok Menipis */}
+            {widgetSettings['low-stock'] && (
+              <Card title="⚠️ Stok Menipis">
           {lowStockProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-center">
               <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-4">
@@ -128,11 +254,14 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-          )}
-        </Card>
+              )}
+            </Card>
 
-        {/* Top Products */}
-        <Card title="📦 Stok Terbanyak">
+            )}
+
+            {/* Top Products */}
+            {widgetSettings['top-products'] && (
+              <Card title="📦 Stok Terbanyak">
           <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar">
             {topProducts.map((product, index) => (
               <div key={product.id} className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg hover:shadow-sm transition">
@@ -149,12 +278,13 @@ export default function Dashboard() {
                   {product.stock} {product.unit}
                 </span>
               </div>
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+              </Card>
+            )}
 
-        {/* Product Types Distribution */}
-        <Card title="📊 Distribusi Jenis">
+            {/* Product Types Distribution */}
+            <Card title="📊 Distribusi Jenis">
           <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar">
             {(() => {
               const typeStats = {}
@@ -178,15 +308,16 @@ export default function Dashboard() {
                     />
                   </div>
                 </div>
-              ))
-            })()}
+                ))
+              })()}
+            </div>
+            </Card>
           </div>
-        </Card>
-      </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:gap-6">
-        {/* Grafik Penjualan */}
-        <Card title="Penjualan Bulanan">
+          {/* Grafik Penjualan */}
+          {widgetSettings['sales-chart'] && (
+            <div className="grid grid-cols-1 gap-4 lg:gap-6">
+              <Card title="Penjualan Bulanan">
           <div className="h-64 lg:h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={salesData}>
@@ -216,13 +347,14 @@ export default function Dashboard() {
                   dot={{ fill: '#16a34a', r: 4 }}
                   activeDot={{ r: 6 }}
                 />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-
-      </div>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+              </Card>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

@@ -1,16 +1,6 @@
-import { useEffect } from 'react'
 import { CheckCircle, XCircle, AlertCircle, X } from 'lucide-react'
 
-export default function Toast({ message, type = 'success', onClose, duration = 3000 }) {
-  useEffect(() => {
-    if (duration) {
-      const timer = setTimeout(() => {
-        onClose()
-      }, duration)
-      return () => clearTimeout(timer)
-    }
-  }, [duration, onClose])
-
+export default function Toast({ message, type = 'success', onClose }) {
   const icons = {
     success: <CheckCircle className="w-5 h-5 text-green-500" />,
     error: <XCircle className="w-5 h-5 text-red-500" />,
@@ -33,7 +23,7 @@ export default function Toast({ message, type = 'success', onClose, duration = 3
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 animate-slide-in-right">
+    <div className="animate-slide-in-right">
       <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg ${bgColors[type]} min-w-[300px] max-w-md`}>
         {icons[type]}
         <p className={`flex-1 text-sm font-medium ${textColors[type]}`}>

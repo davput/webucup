@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Button from '../components/Button'
-import Modal from '../components/Modal'
-import { formatCurrency } from '../lib/utils'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
-import { useToast } from '../hooks/useToast'
+import { useToast } from '../context/ToastContext'
+import { Truck, MapPin, Phone, Package, CheckCircle, Clock, User } from 'lucide-react'
 
 export default function DriverMode() {
   const { showToast } = useToast()
@@ -20,6 +20,9 @@ export default function DriverMode() {
     notes: '',
     proof_photo_url: ''
   })
+  const [loading, setLoading] = useState(false)
+  const [showStartConfirm, setShowStartConfirm] = useState(false)
+  const [deliveryToStart, setDeliveryToStart] = useState(null)
 
   useEffect(() => {
     fetchDrivers()
@@ -49,7 +52,11 @@ export default function DriverMode() {
           *,
           orders (
             *,
-            stores (*)
+            stores (*),
+            order_items (
+              *,
+              products (*)
+            )
           )
         )
       `)
@@ -69,11 +76,24 @@ export default function DriverMode() {
     setDeliveries(data || [])
   }
 
-  async function handleStartDelivery(deliveryId) {
+  function confirmStartDelivery(deliveryId) {
+    setDeliveryToStart(deliveryId)
+    setShowStartConfirm(true)
+  }
+
+  async function handleStartDelivery() {
+    if (loading) return
+    
     try {
+      setLoading(true)
+      const deliveryId = deliveryToStart
+
       await supabase
         .from('deliveries')
-        .update({ status: 'on_delivery' })
+        .update({ 
+          status: 'on_delivery',
+          started_at: new Date().toISOString()
+        })
         .eq('id', deliveryId)
 
       const delivery = deliveries.find(d => d.id === deliveryId)
@@ -121,10 +141,14 @@ export default function DriverMode() {
         }
       }
 
-      showToast('Pengiriman dimulai', 'success')
+      showToast('Pengiriman berhasil dimulai', 'success')
+      setShowStartConfirm(false)
+      setDeliveryToStart(null)
       fetchDriverDeliveries()
     } catch (error) {
-      showToast(error.message, 'error')
+      showToast(error.message || 'Gagal memulai pengiriman', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -132,7 +156,7 @@ export default function DriverMode() {
     setSelectedDelivery(delivery)
     setSelectedOrder(order)
     setDeliveryForm({
-      recipient_name: '',
+      recipient_name: order.orders.stores.owner || '',
       notes: '',
       proof_photo_url: ''
     })
@@ -140,12 +164,16 @@ export default function DriverMode() {
   }
 
   async function handleMarkAsDelivered() {
-    if (!deliveryForm.recipient_name) {
+    if (!deliveryForm.recipient_name.trim()) {
       showToast('Masukkan nama penerima', 'error')
       return
     }
 
+    if (loading) return
+
     try {
+      setLoading(true)
+
       // Update delivery_order status
       await supabase
         .from('delivery_orders')
@@ -173,13 +201,16 @@ export default function DriverMode() {
 
       const allDelivered = deliveryOrders.every(d => 
         d.delivery_status === 'delivered' || 
-        (d.order_id === selectedOrder.order_id) // Include the one we just updated
+        (d.order_id === selectedOrder.order_id)
       )
 
       if (allDelivered) {
         await supabase
           .from('deliveries')
-          .update({ status: 'delivered' })
+          .update({ 
+            status: 'delivered',
+            completed_at: new Date().toISOString()
+          })
           .eq('id', selectedDelivery.id)
       }
 
@@ -187,42 +218,69 @@ export default function DriverMode() {
       setShowDeliveryModal(false)
       fetchDriverDeliveries()
     } catch (error) {
-      showToast(error.message, 'error')
+      showToast(error.message || 'Gagal menandai order terkirim', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
   if (!selectedDriver) {
     return (
-      <div className="p-6 max-w-2xl mx-auto">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">
-            Mode Sopir
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6 text-center">
-            Pilih nama sopir untuk melihat jadwal pengiriman
-          </p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4 sm:p-6">
+        <div className="max-w-2xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-full mb-4">
+              <Truck className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+              Mode Sopir
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Pilih nama sopir untuk melihat jadwal pengiriman
+            </p>
+          </div>
 
+          {/* Driver Selection */}
           <div className="space-y-3">
             {drivers.map(driver => (
               <button
                 key={driver.id}
                 onClick={() => setSelectedDriver(driver.id)}
-                className="w-full p-4 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-left"
+                className="w-full bg-white dark:bg-gray-800 p-5 rounded-xl shadow-md hover:shadow-lg border-2 border-transparent hover:border-blue-500 dark:hover:border-blue-400 transition-all text-left group"
               >
-                <div className="font-semibold text-gray-900 dark:text-gray-100 text-lg">
-                  {driver.name}
-                </div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">
-                  {driver.phone}
+                <div className="flex items-center gap-4">
+                  <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                    <User className="w-7 h-7 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900 dark:text-white text-lg group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {driver.name}
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-1">
+                      <Phone className="w-3.5 h-3.5" />
+                      {driver.phone}
+                    </div>
+                  </div>
+                  <div className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
                 </div>
               </button>
             ))}
           </div>
 
           {drivers.length === 0 && (
-            <p className="text-center text-gray-500 dark:text-gray-400">
-              Belum ada data sopir
-            </p>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-12 text-center">
+              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Truck className="w-8 h-8 text-gray-400" />
+              </div>
+              <p className="text-gray-500 dark:text-gray-400">
+                Belum ada data sopir
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -232,172 +290,227 @@ export default function DriverMode() {
   const currentDriver = drivers.find(d => d.id === selectedDriver)
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              Mode Sopir
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              Sopir: {currentDriver?.name}
-            </p>
-          </div>
-          <Button variant="secondary" onClick={() => setSelectedDriver(null)}>
-            Ganti Sopir
-          </Button>
-        </div>
-      </div>
-
-      {/* Deliveries */}
-      {deliveries.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
-          <p className="text-gray-500 dark:text-gray-400">
-            Tidak ada pengiriman yang dijadwalkan
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {deliveries.map(delivery => (
-            <div
-              key={delivery.id}
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6"
-            >
-              {/* Delivery Header */}
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                    {delivery.delivery_number}
-                  </h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {format(new Date(delivery.delivery_date), 'dd MMMM yyyy', { locale: id })}
-                  </p>
-                  {delivery.truck_number && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Truk: {delivery.truck_number}
-                    </p>
-                  )}
-                </div>
-                {delivery.status === 'scheduled' && (
-                  <Button onClick={() => handleStartDelivery(delivery.id)}>
-                    Mulai Pengiriman
-                  </Button>
-                )}
-                {delivery.status === 'on_delivery' && (
-                  <span className="px-3 py-1 bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 rounded-full text-sm font-medium">
-                    Dalam Pengiriman
-                  </span>
-                )}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4 sm:p-6">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                <User className="w-7 h-7 text-white" />
               </div>
-
-              {/* Delivery Orders */}
-              <div className="space-y-3">
-                {delivery.delivery_orders.map((deliveryOrder, index) => {
-                  const order = deliveryOrder.orders
-                  const totalQty = order.order_items?.reduce((sum, item) => sum + item.quantity, 0) || 0
-                  const isDelivered = deliveryOrder.delivery_status === 'delivered'
-
-                  return (
-                    <div
-                      key={deliveryOrder.id}
-                      className={`border rounded-lg p-4 ${
-                        isDelivered
-                          ? 'border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-900/20'
-                          : 'border-gray-300 dark:border-gray-600'
-                      }`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-bold ${
-                          isDelivered
-                            ? 'bg-green-500 text-white'
-                            : 'bg-blue-600 text-white'
-                        }`}>
-                          {isDelivered ? '✓' : index + 1}
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex justify-between items-start mb-2">
-                            <div>
-                              <div className="font-semibold text-gray-900 dark:text-gray-100">
-                                {order.stores.name}
-                              </div>
-                              <div className="text-sm text-gray-600 dark:text-gray-400">
-                                {order.stores.owner}
-                              </div>
-                            </div>
-                            {isDelivered && (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded text-xs font-medium">
-                                Terkirim
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                            <div>📍 {order.stores.address}</div>
-                            <div>📞 {order.stores.phone}</div>
-                          </div>
-
-                          <div className="bg-gray-100 dark:bg-gray-700 rounded p-3 mb-3">
-                            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Produk: {totalQty} karung
-                            </div>
-                            {order.order_items?.map(item => (
-                              <div key={item.id} className="text-sm text-gray-600 dark:text-gray-400">
-                                • {item.products.name}: {item.quantity} {item.products.unit}
-                              </div>
-                            ))}
-                          </div>
-
-                          {isDelivered ? (
-                            <div className="text-sm text-green-600 dark:text-green-400">
-                              ✓ Diterima oleh: {deliveryOrder.recipient_name}
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {format(new Date(deliveryOrder.delivered_at), 'dd MMM yyyy HH:mm', { locale: id })}
-                              </div>
-                            </div>
-                          ) : (
-                            delivery.status === 'on_delivery' && (
-                              <Button
-                                size="sm"
-                                onClick={() => openDeliveryModal(delivery, deliveryOrder)}
-                              >
-                                Tandai Terkirim
-                              </Button>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {currentDriver?.name}
+                </h1>
+                <p className="text-gray-600 dark:text-gray-400 text-sm flex items-center gap-1 mt-1">
+                  <Phone className="w-3.5 h-3.5" />
+                  {currentDriver?.phone}
+                </p>
               </div>
             </div>
-          ))}
+            <Button variant="secondary" onClick={() => setSelectedDriver(null)}>
+              Ganti Sopir
+            </Button>
+          </div>
         </div>
-      )}
+
+        {/* Deliveries */}
+        {deliveries.length === 0 ? (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-12 text-center">
+            <div className="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Package className="w-10 h-10 text-gray-400" />
+            </div>
+            <p className="text-gray-500 dark:text-gray-400 text-lg">
+              Tidak ada pengiriman yang dijadwalkan
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {deliveries.map(delivery => (
+              <div
+                key={delivery.id}
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+              >
+                {/* Delivery Header */}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 text-white">
+                  <div className="flex justify-between items-start flex-wrap gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                        <Truck className="w-5 h-5" />
+                        {delivery.delivery_number}
+                      </h2>
+                      <p className="text-blue-100 text-sm mt-1 flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        {format(new Date(delivery.delivery_date), 'dd MMMM yyyy', { locale: id })}
+                      </p>
+                      {delivery.truck_number && (
+                        <p className="text-blue-100 text-sm mt-1">
+                          🚛 {delivery.truck_number}
+                        </p>
+                      )}
+                    </div>
+                    {delivery.status === 'scheduled' && (
+                      <Button 
+                        onClick={() => confirmStartDelivery(delivery.id)}
+                        className="bg-white text-blue-600 hover:bg-blue-50"
+                        disabled={loading}
+                      >
+                        Mulai Pengiriman
+                      </Button>
+                    )}
+                    {delivery.status === 'on_delivery' && (
+                      <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm font-medium flex items-center gap-2">
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                        Dalam Pengiriman
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Delivery Orders */}
+                <div className="p-5 space-y-3">
+                  {delivery.delivery_orders.map((deliveryOrder, index) => {
+                    const order = deliveryOrder.orders
+                    const totalQty = order.order_items?.reduce((sum, item) => sum + item.quantity, 0) || 0
+                    const isDelivered = deliveryOrder.delivery_status === 'delivered'
+
+                    return (
+                      <div
+                        key={deliveryOrder.id}
+                        className={`rounded-xl p-4 border-2 transition-all ${
+                          isDelivered
+                            ? 'border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-900/20'
+                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-750'
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-md ${
+                            isDelivered
+                              ? 'bg-green-500 text-white'
+                              : 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white'
+                          }`}>
+                            {isDelivered ? <CheckCircle className="w-5 h-5" /> : index + 1}
+                          </div>
+
+                          <div className="flex-1">
+                            <div className="flex justify-between items-start mb-3">
+                              <div>
+                                <div className="font-bold text-lg text-gray-900 dark:text-white">
+                                  {order.stores.name}
+                                </div>
+                                <div className="text-sm text-gray-600 dark:text-gray-400">
+                                  {order.stores.owner}
+                                </div>
+                              </div>
+                              {isDelivered && (
+                                <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-semibold flex items-center gap-1">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Terkirim
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                              <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600" />
+                                <span>{order.stores.address}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                <Phone className="w-4 h-4 flex-shrink-0 text-blue-600" />
+                                <span>{order.stores.phone}</span>
+                              </div>
+                            </div>
+
+                            <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 rounded-lg p-3 mb-3">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">
+                                <Package className="w-4 h-4" />
+                                Produk ({totalQty} karung)
+                              </div>
+                              <div className="space-y-1">
+                                {order.order_items?.map(item => (
+                                  <div key={item.id} className="text-sm text-gray-700 dark:text-gray-300 flex justify-between">
+                                    <span>• {item.products.name}</span>
+                                    <span className="font-medium">{item.quantity} {item.products.unit}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {isDelivered ? (
+                              <div className="bg-green-100 dark:bg-green-900/30 rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium mb-1">
+                                  <CheckCircle className="w-4 h-4" />
+                                  Diterima oleh: {deliveryOrder.recipient_name}
+                                </div>
+                                <div className="text-xs text-green-600 dark:text-green-500 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {format(new Date(deliveryOrder.delivered_at), 'dd MMM yyyy HH:mm', { locale: id })}
+                                </div>
+                              </div>
+                            ) : (
+                              delivery.status === 'on_delivery' && (
+                                <Button
+                                  className="w-full"
+                                  onClick={() => openDeliveryModal(delivery, deliveryOrder)}
+                                  disabled={loading}
+                                >
+                                  <CheckCircle className="w-4 h-4 mr-2" />
+                                  Tandai Terkirim
+                                </Button>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Start Delivery Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={showStartConfirm}
+        onClose={() => !loading && setShowStartConfirm(false)}
+        onConfirm={handleStartDelivery}
+        title="Mulai Pengiriman"
+        message="Apakah Anda yakin ingin memulai pengiriman ini? Stok produk akan dikurangi."
+        confirmText="Ya, Mulai"
+        cancelText="Batal"
+        type="info"
+        loading={loading}
+      />
 
       {/* Delivery Confirmation Modal */}
-      <Modal
-        isOpen={showDeliveryModal}
-        onClose={() => setShowDeliveryModal(false)}
-        title="Konfirmasi Pengiriman"
-      >
-        <div className="p-6">
-          {selectedOrder && (
-            <>
-              <div className="mb-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                <div className="font-semibold text-gray-900 dark:text-gray-100">
+      {showDeliveryModal && selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !loading && setShowDeliveryModal(false)}
+          />
+          
+          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full animate-slideUp">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                Konfirmasi Pengiriman
+              </h3>
+
+              <div className="mb-5 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <div className="font-semibold text-gray-900 dark:text-white">
                   {selectedOrder.orders.stores.name}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   {selectedOrder.orders.order_number}
                 </div>
               </div>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Nama Penerima <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -406,12 +519,13 @@ export default function DriverMode() {
                     value={deliveryForm.recipient_name}
                     onChange={(e) => setDeliveryForm({ ...deliveryForm, recipient_name: e.target.value })}
                     placeholder="Nama yang menerima barang"
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white transition-all"
+                    disabled={loading}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Catatan (Opsional)
                   </label>
                   <textarea
@@ -419,39 +533,43 @@ export default function DriverMode() {
                     onChange={(e) => setDeliveryForm({ ...deliveryForm, notes: e.target.value })}
                     rows="3"
                     placeholder="Catatan tambahan..."
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white transition-all resize-none"
+                    disabled={loading}
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Foto Bukti (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    value={deliveryForm.proof_photo_url}
-                    onChange={(e) => setDeliveryForm({ ...deliveryForm, proof_photo_url: e.target.value })}
-                    placeholder="URL foto bukti pengiriman"
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Upload foto ke cloud storage dan masukkan URL-nya
-                  </p>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-4 mt-6">
-                <Button variant="secondary" onClick={() => setShowDeliveryModal(false)}>
+              <div className="flex gap-3 mt-6">
+                <Button 
+                  variant="secondary" 
+                  onClick={() => setShowDeliveryModal(false)}
+                  className="flex-1"
+                  disabled={loading}
+                >
                   Batal
                 </Button>
-                <Button onClick={handleMarkAsDelivered}>
-                  Konfirmasi Terkirim
+                <Button 
+                  onClick={handleMarkAsDelivered}
+                  className="flex-1"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Konfirmasi
+                    </>
+                  )}
                 </Button>
               </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
-      </Modal>
+      )}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import Button from '../components/Button'
 import Toast from '../components/Toast'
 import { useToast } from '../hooks/useToast'
 import { supabase } from '../lib/supabase'
-import { KECAMATAN_BANYUWANGI } from '../lib/constants'
+import { ActivityLogger } from '../lib/activityLogger'
 
 export default function StoreForm() {
   const { id } = useParams()
@@ -14,6 +14,11 @@ export default function StoreForm() {
   const isEdit = !!id
   const { toast, showSuccess, showError, hideToast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [districts, setDistricts] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [filteredDistricts, setFilteredDistricts] = useState([])
+  const [selectedDistrictIndex, setSelectedDistrictIndex] = useState(-1)
   const [formData, setFormData] = useState({
     name: '',
     owner: '',
@@ -25,10 +30,58 @@ export default function StoreForm() {
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
+    loadDistricts()
     if (isEdit) {
       loadStore()
     }
+
+    // Close dropdown when clicking outside
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.relative')) {
+        setShowDropdown(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [id])
+
+  const loadDistricts = async () => {
+    try {
+      const { data } = await supabase
+        .from('districts')
+        .select('*')
+        .order('name')
+      setDistricts(data || [])
+      setFilteredDistricts(data || [])
+    } catch (error) {
+      console.error('Error loading districts:', error)
+    }
+  }
+
+  const handleSearchChange = (value) => {
+    setSearchTerm(value)
+    setShowDropdown(true)
+    setSelectedDistrictIndex(-1)
+    
+    if (value.trim() === '') {
+      setFilteredDistricts(districts)
+    } else {
+      const filtered = districts.filter(district =>
+        district.name.toLowerCase().includes(value.toLowerCase())
+      )
+      setFilteredDistricts(filtered)
+    }
+  }
+
+  const handleSelectDistrict = (district) => {
+    setFormData({ ...formData, region: district.name })
+    setSearchTerm(district.name)
+    setShowDropdown(false)
+    setSelectedDistrictIndex(-1)
+  }
 
   const loadStore = async () => {
     setLoading(true)
@@ -45,6 +98,7 @@ export default function StoreForm() {
     }
 
     setFormData(data)
+    setSearchTerm(data.region || '')
     setLoading(false)
   }
 
@@ -94,6 +148,9 @@ export default function StoreForm() {
 
         if (error) throw error
 
+        // Log activity
+        await ActivityLogger.updateStore(formData.name)
+
         showSuccess('Toko berhasil diupdate!')
       } else {
         const { error } = await supabase
@@ -101,6 +158,9 @@ export default function StoreForm() {
           .insert([formData])
 
         if (error) throw error
+
+        // Log activity
+        await ActivityLogger.createStore(formData.name)
 
         showSuccess('Toko berhasil ditambahkan!')
       }
@@ -216,21 +276,74 @@ export default function StoreForm() {
                     {errors.address && <p className="text-red-500 text-sm mt-1">{errors.address}</p>}
                   </div>
 
-                  <div>
+                  <div className="relative">
                     <label>Kecamatan *</label>
-                    <select
+                    <input
+                      type="text"
                       required
-                      value={formData.region}
-                      onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                      value={searchTerm}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      onFocus={() => setShowDropdown(true)}
+                      onKeyDown={(e) => {
+                        if (!showDropdown) return
+                        
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault()
+                          setSelectedDistrictIndex(prev => 
+                            prev < filteredDistricts.length - 1 ? prev + 1 : prev
+                          )
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          setSelectedDistrictIndex(prev => prev > 0 ? prev - 1 : -1)
+                        } else if (e.key === 'Enter' && selectedDistrictIndex >= 0) {
+                          e.preventDefault()
+                          const district = filteredDistricts[selectedDistrictIndex]
+                          handleSelectDistrict(district)
+                        } else if (e.key === 'Escape') {
+                          setShowDropdown(false)
+                          setSelectedDistrictIndex(-1)
+                        }
+                      }}
+                      placeholder="Ketik untuk mencari kecamatan..."
                       className={errors.region ? 'border-red-500' : ''}
-                    >
-                      <option value="">-- Pilih Kecamatan --</option>
-                      {KECAMATAN_BANYUWANGI.map((kecamatan) => (
-                        <option key={kecamatan} value={kecamatan}>
-                          {kecamatan}
-                        </option>
-                      ))}
-                    </select>
+                    />
+                    
+                    {/* Dropdown Results */}
+                    {showDropdown && filteredDistricts.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {filteredDistricts.map((district, index) => (
+                          <button
+                            key={district.id}
+                            type="button"
+                            onClick={() => handleSelectDistrict(district)}
+                            className={`w-full text-left px-4 py-2 text-gray-900 dark:text-gray-100 transition-colors ${
+                              index === selectedDistrictIndex
+                                ? 'bg-blue-50 dark:bg-blue-900/30'
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            {district.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* No Results */}
+                    {showDropdown && searchTerm && filteredDistricts.length === 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg p-4">
+                        <p className="text-gray-500 dark:text-gray-400 text-sm">
+                          Kecamatan tidak ditemukan. 
+                          <button
+                            type="button"
+                            onClick={() => navigate('/settings')}
+                            className="text-blue-600 hover:text-blue-800 dark:text-blue-400 ml-1"
+                          >
+                            Tambah di Pengaturan
+                          </button>
+                        </p>
+                      </div>
+                    )}
+                    
                     {errors.region && <p className="text-red-500 text-sm mt-1">{errors.region}</p>}
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       Kecamatan digunakan untuk pengelompokan dan optimasi rute pengiriman

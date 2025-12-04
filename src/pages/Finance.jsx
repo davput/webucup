@@ -3,6 +3,7 @@ import { Plus, DollarSign } from 'lucide-react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
+import CurrencyInput from '../components/CurrencyInput'
 import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
 import { format } from 'date-fns'
@@ -15,7 +16,7 @@ export default function Finance() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formData, setFormData] = useState({
     order_id: '',
-    amount: '',
+    amount: 0,
     payment_method: 'cash',
     notes: ''
   })
@@ -83,7 +84,7 @@ export default function Finance() {
     }
 
     setIsModalOpen(false)
-    setFormData({ order_id: '', amount: '', payment_method: 'cash', notes: '' })
+    setFormData({ order_id: '', amount: 0, payment_method: 'cash', notes: '' })
     loadData()
   }
 
@@ -183,13 +184,14 @@ export default function Finance() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah</label>
-            <input
-              type="number"
-              required
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Jumlah Pembayaran
+            </label>
+            <CurrencyInput
               value={formData.amount}
-              onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              onChange={(value) => setFormData({ ...formData, amount: value })}
+              required
+              className="w-full"
             />
           </div>
           <div>

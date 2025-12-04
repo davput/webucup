@@ -5,10 +5,13 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import CurrencyInput from '../components/CurrencyInput'
 import { supabase } from '../lib/supabase'
+import { ActivityLogger } from '../lib/activityLogger'
+import { useToast } from '../context/ToastContext'
 
 export default function ProductForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const isEdit = !!id
   const [loading, setLoading] = useState(false)
   const [photoPreview, setPhotoPreview] = useState(null)
@@ -40,30 +43,46 @@ export default function ProductForm() {
   }, [id])
 
   const loadMasterData = async () => {
-    const { data: typesData } = await supabase.from('product_types').select('*').order('name')
-    const { data: categoriesData } = await supabase.from('product_categories').select('*').order('name')
-    const { data: unitsData } = await supabase.from('product_units').select('*').order('name')
-    
-    setTypes(typesData || [])
-    setCategories(categoriesData || [])
-    setUnits(unitsData || [])
+    try {
+      const { data: typesData } = await supabase
+        .from('product_types')
+        .select('*')
+        .order('name')
+      setTypes(typesData || [])
+
+      const { data: unitsData } = await supabase
+        .from('units')
+        .select('*')
+        .order('name')
+      setUnits(unitsData || [])
+    } catch (error) {
+      showToast('Gagal memuat data master', 'error')
+    }
   }
 
   const loadProduct = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', id)
-      .single()
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', id)
+        .single()
 
-    if (data) {
-      setFormData(data)
-      if (data.photo_url) {
-        setPhotoPreview(data.photo_url)
+      if (error) throw error
+
+      if (data) {
+        setFormData(data)
+        if (data.photo_url) {
+          setPhotoPreview(data.photo_url)
+        }
       }
+    } catch (error) {
+      showToast('Gagal memuat data produk', 'error')
+      navigate('/products')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const validateForm = () => {
@@ -105,6 +124,7 @@ export default function ProductForm() {
     e.preventDefault()
 
     if (!validateForm()) {
+      showToast('Mohon lengkapi semua field yang wajib diisi', 'error')
       return
     }
 
@@ -127,19 +147,30 @@ export default function ProductForm() {
           .eq('id', id)
 
         if (error) throw error
-        alert('Produk berhasil diupdate!')
+        
+        // Log activity
+        await ActivityLogger.updateProduct(formData.name)
+        
+        showToast(`Produk "${formData.name}" berhasil diupdate!`, 'success')
       } else {
         const { error } = await supabase
           .from('products')
           .insert([{ ...productData, stock: 0 }])
 
         if (error) throw error
-        alert('Produk berhasil ditambahkan!')
+        
+        // Log activity
+        await ActivityLogger.createProduct(formData.name)
+        
+        showToast(`Produk "${formData.name}" berhasil ditambahkan!`, 'success')
       }
 
-      navigate('/products')
+      // Navigate after a short delay to show the toast
+      setTimeout(() => {
+        navigate('/products')
+      }, 1000)
     } catch (error) {
-      alert('Error: ' + error.message)
+      showToast(error.message || 'Gagal menyimpan produk', 'error')
     } finally {
       setLoading(false)
     }
@@ -239,23 +270,17 @@ export default function ProductForm() {
                       ))}
                     </select>
                     {errors.type && <p className="text-red-500 text-sm mt-1">{errors.type}</p>}
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/settings')}
+                        className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
+                      >
+                        Kelola jenis produk di Pengaturan
+                      </button>
+                    </p>
                   </div>
 
-                  <div>
-                    <label>Kategori</label>
-                    <select
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    >
-                      <option value="">-- Pilih Kategori --</option>
-                      {categories.map(category => (
-                        <option key={category.id} value={category.name}>{category.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label>Satuan Kemasan *</label>
                     <select
@@ -268,7 +293,19 @@ export default function ProductForm() {
                         <option key={unit.id} value={unit.name.toLowerCase()}>{unit.name}</option>
                       ))}
                     </select>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/settings')}
+                        className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
+                      >
+                        Kelola satuan di Pengaturan
+                      </button>
+                    </p>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                   <div>
                     <label>Berat per Karung (kg)</label>
